@@ -1,63 +1,55 @@
-import pickle
 import streamlit as st
+import pickle
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
-# Load the trained model
-filename = 'model.pkl'
-with open(filename, 'rb') as file:
-    loaded_model = pickle.load(file)
+# Load the model
+st.title('Passenger Survival Prediction')
+st.subheader('Upload a CSV file to check survival status')
 
-st.title('Survival Prediction App 🚢')
-st.subheader('Upload your passenger dataset to predict survival.')
+try:
+    with open('model.pkl', 'rb') as file:
+        load_model = pickle.load(file)
+except FileNotFoundError:
+    st.error("Error: Model file ('model.pkl') not found. Ensure the file is in the same directory.")
+    st.stop()
+
+# Load feature columns
+try:
+    df = pd.read_csv("dependent_feature.csv")
+    column_list = df.columns.to_list()
+except FileNotFoundError:
+    st.error("Error: 'dependent_feature.csv' not found. Ensure the file is in the same directory.")
+    column_list = []
 
 # File uploader
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+up_file = st.file_uploader('Upload a CSV file', type=['csv'])
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+if up_file is not None:
+    try:
+        # Read uploaded CSV
+        df1 = pd.read_csv(up_file)
 
-    # Display uploaded data
-    st.write("### Uploaded Data Preview:")
-    st.dataframe(df.head())
+        # Check if required columns exist in uploaded file
+        missing_columns = [col for col in column_list if col not in df1.columns]
+        if missing_columns:
+            st.error(f"Missing columns in uploaded file: {missing_columns}")
+            st.stop()
 
-    # Identifying numerical and categorical columns
-    numerical_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-    categorical_columns = df.select_dtypes(include=['object']).columns.tolist()
+        # Reorder and fill missing columns with 0 (if any)
+        df1 = df1.reindex(columns=column_list, fill_value=0)
 
-    # Handle missing values
-    df.fillna(0, inplace=True)
+        # Make prediction
+        prediction = load_model.predict(df1)
 
-    # Standardize numerical data
-    scaler = StandardScaler()
-    df_numerical = pd.DataFrame(scaler.fit_transform(df[numerical_columns]), columns=numerical_columns)
+        # Convert numerical predictions to text labels
+        prediction_text = np.where(prediction == 1, 'Survived', 'Did Not Survive')
 
-    # Encode categorical data
-    encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
-    df_categorical = pd.DataFrame(encoder.fit_transform(df[categorical_columns]))
+        # Display results
+        st.subheader('Prediction Results:')
+        df1['Survival Prediction'] = prediction_text
+        st.write(df1[['Survival Prediction']])  # Show only predictions
 
-    # Combine numerical and categorical features
-    df_preprocessed = pd.concat([df_numerical, df_categorical], axis=1)
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
 
-    # Ensure features match model training
-    expected_columns = list(loaded_model.feature_names_in_)  # Model's expected feature names
-
-    for col in expected_columns:
-        if col not in df_preprocessed.columns:
-            df_preprocessed[col] = 0  # Add missing columns
-
-    df_preprocessed = df_preprocessed[expected_columns]  # Reorder columns
-
-    # Make predictions
-    prediction = loaded_model.predict(df_preprocessed)
-    prediction_text = np.where(prediction == 1, 'Survived', 'Not Survived')
-
-    # Display results
-    st.subheader('Survival Prediction Results:')
-    df['Survival Prediction'] = prediction_text
-    st.write(df[['Survival Prediction']])
-
-    # Download button for results
-    df.to_csv("predictions.csv", index=False)
-    st.download_button(label="Download Predictions", data=open("predictions.csv", "rb"), file_name="predictions.csv")
